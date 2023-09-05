@@ -113,9 +113,9 @@ namespace BetaCrewClientApp
         {
             // handle missing sequences
             List<int> missingSequences = FindMissingSequences(receivedPackets);
-            EventCollection.Log("Missing Packets Count = " + missingSequences.Count);
 
             ConnectTcpClient(ServerIpAddress, ServerPort, out TcpClient client);
+            EventCollection.Log("Missing Packets Count = " + missingSequences.Count);
             using (NetworkStream stream = client.GetStream())
             {
                 foreach (int missingSeq in missingSequences)
