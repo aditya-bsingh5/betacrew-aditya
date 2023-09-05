@@ -8,6 +8,7 @@ using System.Configuration;
 using betacrew_aditya.UTIL;
 using betacrew_aditya.Packet;
 using betacrew_aditya.EventCollection;
+
 namespace BetaCrewClientApp
 {
     class BetaCrew
@@ -15,15 +16,15 @@ namespace BetaCrewClientApp
         static void Main(string[] args)
         {
             EventCollection.Clear();
-            EventCollection.Log("Start Application");
+            EventCollection.Log("Client Initiated");
 
             try
             {
-                ConnectTcpClient(out TcpClient client);
-
-                Process(client);
-
-                client.Close();
+                Process();
+            }
+            catch (ConfigurationErrorsException)
+            {
+                EventCollection.Log("Error reading App.config. Make sure it's properly configured.");
             }
             catch (SocketException e)
             {
@@ -35,17 +36,25 @@ namespace BetaCrewClientApp
             }
         }
 
-        // establishing connection
-        public static void ConnectTcpClient(out TcpClient client)
+        private static int ServerPort
         {
-            string ipAddress = 
-            ConfigurationManager.AppSettings.Get("IPADDRESS") ?? 
-            Dns.GetHostEntry(Dns.GetHostName()).AddressList.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)?.ToString() ?? 
-            throw new Exception("No network adapters with an IPv4 address in the system!");
+            get { return Int32.TryParse(ConfigurationManager.AppSettings.Get("PORT"), out int parsedPort) ? parsedPort : 3000; }
+        }
 
-            EventCollection.Log("IP Address Fetched Successfully");
-                
-            int port = int.TryParse(ConfigurationManager.AppSettings.Get("PORT"), out int parsedPort) ? parsedPort : 3000;
+        private static string ServerIpAddress
+        {
+            // looks for ip address in config file, if it is empty localhost ip is used
+            get 
+            { 
+                return ConfigurationManager.AppSettings.Get("IPADDRESS") ?? 
+                    Dns.GetHostEntry(Dns.GetHostName()).AddressList.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)?.ToString() ?? 
+                    throw new Exception("No network adapters with an IPv4 address in the system"); 
+            }
+        }
+        
+        // establishing tcp connection
+        public static void ConnectTcpClient(string ipAddress, int port, out TcpClient client)
+        {               
             client = new TcpClient();
             client.Connect(ipAddress, port);
 
@@ -53,8 +62,28 @@ namespace BetaCrewClientApp
         }      
 
         // process response payload
-        static void Process(TcpClient client) 
+        static void Process() 
         {
+            // create a list to store received packets
+            List<Packet> receivedPackets = new();
+
+            StreamAllPackets(receivedPackets);
+
+            StreamMissingPackets(receivedPackets);
+            
+
+            Console.WriteLine("Process Completed");
+
+            // generate a JSON file with the collected data
+            GenerateJsonOutput(receivedPackets);
+            Console.WriteLine("JSON Output Created");
+        }
+        
+
+        static void StreamAllPackets(List<Packet> receivedPackets)
+        {
+            ConnectTcpClient(ServerIpAddress, ServerPort, out TcpClient client);
+
             using NetworkStream stream = client.GetStream();
 
             // send a request to stream all packets
@@ -65,9 +94,6 @@ namespace BetaCrewClientApp
             stream.Write(requestPayload, 0, requestPayload.Length);
             EventCollection.Log("Request \"Stream All Packets\" Sent");
 
-            // create a list to store received packets
-            List<Packet> receivedPackets = new List<Packet>();
-
             while (true)
             {
                 byte[] buffer = new byte[UTIL.PACKETSIZE];
@@ -76,58 +102,46 @@ namespace BetaCrewClientApp
                 if (bytesRead == 0)
                     break; // Server closed the connection
 
-                // parse the received packet
                 Packet packet = ParsePacket(buffer);
-
-                // add the packet to the list
                 receivedPackets.Add(packet);
             }
 
-            EventCollection.Log("Received Packets Count = " + receivedPackets.Count);
-
+            EventCollection.Log("Received \"Stream All Packets\" Count = " + receivedPackets.Count);
+        }
+        
+        static void StreamMissingPackets(List<Packet> receivedPackets)
+        {
             // handle missing sequences
             List<int> missingSequences = FindMissingSequences(receivedPackets);
             EventCollection.Log("Missing Packets Count = " + missingSequences.Count);
 
-            ConnectTcpClient(out client);
-            using (NetworkStream stream1 = client.GetStream())
+            ConnectTcpClient(ServerIpAddress, ServerPort, out TcpClient client);
+            using (NetworkStream stream = client.GetStream())
             {
                 foreach (int missingSeq in missingSequences)
                 {
                     // Request missing packets one by one
                     byte[] resendRequest = CreateResendRequest(missingSeq);
-                    stream1.Write(resendRequest, 0, resendRequest.Length);
+                    stream.Write(resendRequest, 0, resendRequest.Length);
 
-                    // Receive and process the missing packet
                     byte[] buffer = new byte[UTIL.PACKETSIZE];
-                    int bytesRead = stream1.Read(buffer, 0, buffer.Length);
-                    Console.WriteLine("BytesRead Missing = " + bytesRead);
-                    Console.WriteLine("DataPoints Missing = " + bytesRead / 17);
+                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    
                     if (bytesRead == 0)
-                        break; // server closed the connection
+                        break; 
 
-                    // parse and process the missing packet
                     Packet packet = ParsePacket(buffer);
-
-                    // add the packet to the list
                     receivedPackets.Add(packet);
                 }
             }
+
+            EventCollection.Log("Received Missing Packets");
             client.Close();
-            
-            Console.WriteLine("Completed");
-
-
-            // generate a JSON file with the collected data
-            GenerateJsonOutput(receivedPackets);
-            Console.WriteLine("JSON created");
         }
         
         // parse a response packet and create a Packet object
         public static Packet ParsePacket(byte[] buffer)
         {
-            Console.WriteLine("byte array: " + BitConverter.ToString(buffer));
-
             Packet packet = new Packet();
             packet.Symbol = Encoding.ASCII.GetString(buffer, 0, 4);
             packet.BuySellIndicator = (char)buffer[4];
@@ -172,6 +186,7 @@ namespace BetaCrewClientApp
             byte[] requestPayload = new byte[2];
             requestPayload[0] = 2; // Call Type 2 for "Resend Packet"
             requestPayload[1] = Convert.ToByte(sequence);
+
             return requestPayload;
         }
 

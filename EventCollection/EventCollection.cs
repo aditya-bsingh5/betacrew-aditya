@@ -16,6 +16,8 @@ namespace betacrew_aditya.EventCollection
         }
         public static void Log(string message)
         {   
+            Console.WriteLine(message);
+            
             TextWriter tsw = new StreamWriter(path, true); 
             
             //Writing text to the file.
