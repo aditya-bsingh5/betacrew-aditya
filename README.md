@@ -20,8 +20,8 @@ Instructions for Running the Client Application:
    - Open your terminal.
    - Navigate to the directory containing the Client Application.
    - Perform the following steps to clean, build, and run the application:
-     - Clean the project: `dotnet clean`
      - Restore project dependencies: `dotnet restore`
+     - Clean the project: `dotnet clean`
      - Build the project: `dotnet build`
      - Run the application: `dotnet run`
 
