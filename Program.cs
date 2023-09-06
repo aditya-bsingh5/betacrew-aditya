@@ -56,7 +56,7 @@ namespace BetaCrewClientApp
         public static void ConnectTcpClient(string ipAddress, int port, out TcpClient client)
         {   
             client = new TcpClient();
-            for (int i = 0; i < UTIL.NumberOfReconTries; i++)
+            for (int i = 0; i < UTIL.NumberOfReconAttempts; i++)
             {
                 try
                 {
@@ -131,7 +131,6 @@ namespace BetaCrewClientApp
         
         static void StreamMissingPackets(List<Packet> receivedPackets)
         {
-            // handle missing sequences
             List<int> missingSequences = FindMissingSequences(receivedPackets);
 
             ConnectTcpClient(ServerIpAddress, ServerPort, out TcpClient client);
@@ -175,7 +174,17 @@ namespace BetaCrewClientApp
 
             return packet;
         }
+        
+        public static int HexadecimalToInt32(byte[] buffer, int startIdx)
+        {
+            byte[] subArray = new byte[UTIL.INT32SIZE];
+            Array.Copy(buffer, startIdx, subArray, 0, UTIL.INT32SIZE);
+            Array.Reverse(subArray);
 
+            return BitConverter.ToInt32(subArray, 0);
+        }
+
+        // packet validation
         static bool ValidatePacket(Packet packet)
         {
             bool validSymbol = packet.Symbol.All(char.IsLetterOrDigit); // Check if Symbol contains only letters and digits
@@ -189,21 +198,12 @@ namespace BetaCrewClientApp
             return true;
         }
 
-        public static int HexadecimalToInt32(byte[] buffer, int startIdx)
-        {
-            byte[] subArray = new byte[UTIL.INT32SIZE];
-            Array.Copy(buffer, startIdx, subArray, 0, UTIL.INT32SIZE);
-            Array.Reverse(subArray);
-
-            return BitConverter.ToInt32(subArray, 0);
-        }
-
         // find missing sequences in the received packets
         static List<int> FindMissingSequences(List<Packet> receivedPackets)
         {
             HashSet<int> set = new();
             List<int> missingSequences = new();
-            int lastSeq = receivedPackets.Max(p => p.Sequence); // last sequence is never missed
+            int lastSeq = receivedPackets.Max(p => p.Sequence); // assumption: last sequence packet is never missed
 
             foreach (Packet packet in receivedPackets)
             {
