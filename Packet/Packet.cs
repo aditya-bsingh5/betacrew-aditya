@@ -8,7 +8,7 @@ namespace betacrew_aditya.Packet
 {
     public class Packet
     {
-        public string? Symbol { get; set; }
+        public string Symbol { get; set; } = string.Empty;
         public char BuySellIndicator { get; set; }
         public int Quantity { get; set; }
         public int Price { get; set; }

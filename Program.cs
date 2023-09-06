@@ -16,7 +16,7 @@ namespace BetaCrewClientApp
         static void Main(string[] args)
         {
             EventCollection.Clear();
-            EventCollection.Log("Client Initiated");
+            EventCollection.Log("Client application started.");
 
             try
             {
@@ -24,11 +24,11 @@ namespace BetaCrewClientApp
             }
             catch (ConfigurationErrorsException)
             {
-                EventCollection.Log("Error reading App.config. Make sure it's properly configured.");
+                EventCollection.Log("Error: Unable to read the configuration file (App.config). Please ensure it's correctly configured.");
             }
             catch (SocketException e)
             {
-                EventCollection.Log($"SocketException: {e}" + e);
+                EventCollection.Log($"Error: {e.Message}");
             }
             catch (Exception ex)
             {
@@ -54,16 +54,32 @@ namespace BetaCrewClientApp
         
         // establishing tcp connection
         public static void ConnectTcpClient(string ipAddress, int port, out TcpClient client)
-        {               
+        {   
             client = new TcpClient();
-            client.Connect(ipAddress, port);
-
-            EventCollection.Log("TCP Client Connection: " + (client.Connected ? "Succeeded" : "Failed"));     
-        }      
+            for (int i = 0; i < UTIL.NumberOfReconTries; i++)
+            {
+                try
+                {
+                    client.Connect(ipAddress, port);
+                    if (client.Connected)
+                    {
+                        EventCollection.Log("Connected to the server.");
+                        return;
+                    }
+                }
+                catch (Exception)
+                {
+                    EventCollection.Log("Connection attempt failed. Retrying...");
+                }
+            }
+            throw new Exception("Failed to establish a connection to the server. Ensure that the server is online and reachable.");
+        }
 
         // process response payload
         static void Process() 
         {
+            EventCollection.Log("--------- Process Started ---------");
+
             // create a list to store received packets
             List<Packet> receivedPackets = new();
 
@@ -72,11 +88,12 @@ namespace BetaCrewClientApp
             StreamMissingPackets(receivedPackets);
             
 
-            Console.WriteLine("Process Completed");
+            EventCollection.Log("--------- Process Completed ---------");
 
             // generate a JSON file with the collected data
             GenerateJsonOutput(receivedPackets);
-            Console.WriteLine("JSON Output Created");
+
+            EventCollection.Log("JSON Output Created");
         }
         
 
@@ -92,7 +109,7 @@ namespace BetaCrewClientApp
             requestPayload[1] = 0;
 
             stream.Write(requestPayload, 0, requestPayload.Length);
-            EventCollection.Log("Request \"Stream All Packets\" Sent");
+            EventCollection.Log("Streaming all packets...");
 
             while (true)
             {
@@ -103,10 +120,13 @@ namespace BetaCrewClientApp
                     break; // Server closed the connection
 
                 Packet packet = ParsePacket(buffer);
-                receivedPackets.Add(packet);
+                if (ValidatePacket(packet)) 
+                {
+                    receivedPackets.Add(packet);
+                }
             }
 
-            EventCollection.Log("Received \"Stream All Packets\" Count = " + receivedPackets.Count);
+            EventCollection.Log("Received packets successfully. Total packets received: " + receivedPackets.Count);
         }
         
         static void StreamMissingPackets(List<Packet> receivedPackets)
@@ -115,7 +135,7 @@ namespace BetaCrewClientApp
             List<int> missingSequences = FindMissingSequences(receivedPackets);
 
             ConnectTcpClient(ServerIpAddress, ServerPort, out TcpClient client);
-            EventCollection.Log("Missing Packets Count = " + missingSequences.Count);
+            EventCollection.Log("Detected missing packets: " + missingSequences.Count);
             using (NetworkStream stream = client.GetStream())
             {
                 foreach (int missingSeq in missingSequences)
@@ -131,11 +151,15 @@ namespace BetaCrewClientApp
                         break; 
 
                     Packet packet = ParsePacket(buffer);
-                    receivedPackets.Add(packet);
+
+                    if (ValidatePacket(packet)) 
+                    {
+                        receivedPackets.Add(packet);
+                    }
                 }
             }
 
-            EventCollection.Log("Received Missing Packets");
+            EventCollection.Log("Received missing packets successfully.");
             client.Close();
         }
         
@@ -148,7 +172,21 @@ namespace BetaCrewClientApp
             packet.Quantity = HexadecimalToInt32(buffer, 5);
             packet.Price = HexadecimalToInt32(buffer, 9);
             packet.Sequence = HexadecimalToInt32(buffer, 13);
+
             return packet;
+        }
+
+        static bool ValidatePacket(Packet packet)
+        {
+            bool validSymbol = packet.Symbol.All(char.IsLetterOrDigit); // Check if Symbol contains only letters and digits
+            bool validBuySellIndicator = (packet.BuySellIndicator == 'B' || packet.BuySellIndicator == 'S');
+
+            if(packet.Quantity < 0 || packet.Price < 0 || !validSymbol || !validBuySellIndicator) 
+            {
+                EventCollection.Log("\tInvalid Packet Data. " + packet.GetHashCode());
+                return false;
+            }
+            return true;
         }
 
         public static int HexadecimalToInt32(byte[] buffer, int startIdx)
